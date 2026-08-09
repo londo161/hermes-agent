@@ -152,6 +152,7 @@ import {
 } from './native-oauth'
 import { runNativeLogin } from './native-oauth-login'
 import { loadNativeTokenSet, type NativeTokenStoreIo, persistNativeTokenSet } from './native-token-store'
+import { currentNativeCopy } from './native-copy'
 import { serializeJsonBody, setJsonRequestHeaders } from './oauth-net-request'
 import { createKeepAwake } from './power-save'
 import { FirstRunSetupResetError, runPrimaryBackendStartup } from './primary-backend-startup'
@@ -1125,7 +1126,7 @@ let nativeThemeListenerInstalled = false
 let bootProgressState = {
   error: null,
   fakeMode: BOOT_FAKE_MODE,
-  message: 'Waiting to start Hermes backend',
+  message: currentNativeCopy().waitingBackend,
   phase: 'idle',
   progress: 0,
   running: false,
@@ -1623,7 +1624,7 @@ function getFirstRunSetupGate() {
         updateBootProgress(
           {
             error: null,
-            message: `Still waiting for first-run setup choice after ${Math.round(stuckAfterMs / 1000)} seconds`,
+            message: currentNativeCopy().waitingFirstRunChoiceFor(Math.round(stuckAfterMs / 1000)),
             phase: 'bootstrap.choice',
             progress: 12,
             running: true
@@ -1648,7 +1649,7 @@ async function waitForFirstRunSetupChoice(backend) {
   updateBootProgress(
     {
       error: null,
-      message: 'Waiting for first-run setup choice',
+      message: currentNativeCopy().waitingFirstRunChoice,
       phase: 'bootstrap.choice',
       progress: 12,
       running: true
@@ -2470,7 +2471,7 @@ async function checkUpdates() {
     return {
       supported: false,
       reason: 'not-a-git-checkout',
-      message: `${updateRoot} isn't a git checkout — desktop self-update only runs against a source install.`,
+      message: currentNativeCopy().notGitCheckout(updateRoot),
       hermesRoot: updateRoot,
       branch
     }
@@ -3361,7 +3362,7 @@ async function applyUpdatesPosixInApp(opts: any) {
     // best effort
   }
 
-  emitUpdateProgress({ stage: 'update', message: 'Updating Hermes (git + dependencies)…', percent: 10 })
+  emitUpdateProgress({ stage: 'update', message: currentNativeCopy().updatingHermes, percent: 10 })
 
   const updated = (await runStreamedUpdate(hermes, ['update', '--yes', ...branchArgs], {
     cwd: updateRoot,
@@ -3370,7 +3371,7 @@ async function applyUpdatesPosixInApp(opts: any) {
   })) as any
 
   if (updated.code !== 0) {
-    emitUpdateProgress({ stage: 'error', message: 'hermes update failed.', error: updated.error || 'update-failed' })
+    emitUpdateProgress({ stage: 'error', message: currentNativeCopy().updateFailed, error: updated.error || 'update-failed' })
 
     return { ok: false, error: 'hermes update failed' }
   }
@@ -3382,7 +3383,7 @@ async function applyUpdatesPosixInApp(opts: any) {
   // off the healed dist so we reach the swap+relaunch below instead of bailing.
   const rebuilt = await runRebuildWithRetry(attempt => {
     if (attempt > 0) {
-      emitUpdateProgress({ stage: 'rebuild', message: 'Retrying the desktop rebuild…', percent: 60 })
+      emitUpdateProgress({ stage: 'rebuild', message: currentNativeCopy().retryingDesktopRebuild, percent: 60 })
     }
 
     return runStreamedUpdate(hermes, ['desktop', '--build-only'], { cwd: updateRoot, env, stage: 'rebuild' })
@@ -3391,7 +3392,7 @@ async function applyUpdatesPosixInApp(opts: any) {
   if (rebuilt.code !== 0) {
     emitUpdateProgress({
       stage: 'error',
-      message: 'Backend updated, but the desktop rebuild failed. Restart Hermes to retry.',
+      message: currentNativeCopy().backendUpdatedDesktopBuildFailed,
       error: rebuilt.error || 'rebuild-failed'
     })
 
@@ -3438,7 +3439,7 @@ async function applyUpdatesPosixInApp(opts: any) {
     const outcome = decideRelaunchOutcome({ underUnpacked, sandboxOk })
 
     if (outcome === 'relaunch') {
-      emitUpdateProgress({ stage: 'restart', message: 'Restarting Hermes…', percent: 100 })
+      emitUpdateProgress({ stage: 'restart', message: currentNativeCopy().restartingHermes, percent: 100 })
       // Preserve launch context across the re-exec: replay the original args
       // (filtered of Electron internals) and the env/cwd that define which
       // backend/profile/root this instance talks to. Without this the
@@ -3476,7 +3477,7 @@ async function applyUpdatesPosixInApp(opts: any) {
           backendUpdated: true,
           guiUpdated: false,
           manualRestart: true,
-          message: 'Backend updated. Quit and reopen Hermes to load the new version.'
+          message: currentNativeCopy().backendUpdatedReopen
         }
       }
     }
@@ -3535,7 +3536,7 @@ async function applyUpdatesPosixInApp(opts: any) {
     return { ok: true, backendUpdated: true, rebuiltApp: rebuiltApp || null }
   }
 
-  emitUpdateProgress({ stage: 'restart', message: 'Installing the updated app and restarting…', percent: 95 })
+  emitUpdateProgress({ stage: 'restart', message: currentNativeCopy().installingUpdatedApp, percent: 95 })
 
   // Detached swapper: wait for THIS process to exit (so the bundle is free),
   // ditto the rebuilt app over the running one, clear quarantine, relaunch.
@@ -3567,7 +3568,7 @@ fi
   } catch (err) {
     emitUpdateProgress({
       stage: 'done',
-      message: 'Backend + app updated. Restart Hermes to load the new version.',
+      message: currentNativeCopy().backendAndAppUpdated,
       percent: 100
     })
     rememberLog(`[updates] could not write swap script: ${err.message}; rebuilt app at ${rebuiltApp}`)
@@ -4034,7 +4035,7 @@ function resolveHermesBackend(backendArgs) {
   //    is a recoverable state the GUI can drive through.
   return {
     kind: 'bootstrap-needed',
-    label: 'Hermes Agent not installed yet; bootstrap required',
+    label: currentNativeCopy().bootstrapRequired,
     command: null,
     args: backendArgs,
     bootstrap: true,
@@ -4208,7 +4209,7 @@ async function ensureRuntime(backend) {
   backend.label = `Hermes at ${ACTIVE_HERMES_ROOT} (venv: ${VENV_ROOT})`
   updateBootProgress({
     phase: 'runtime.ready',
-    message: 'Hermes runtime is ready',
+    message: currentNativeCopy().runtimeReady,
     progress: 82,
     running: true,
     error: null
@@ -4831,7 +4832,7 @@ async function saveImageFromUrl(rawUrl) {
   const fallbackName = filenameFromUrl(rawUrl, `image${extensionForMimeType(mimeType) || '.png'}`)
 
   const result = await dialog.showSaveDialog(mainWindow, {
-    title: 'Save Image',
+    title: currentNativeCopy().saveImage,
     defaultPath: fallbackName
   })
 
@@ -5350,10 +5351,11 @@ function sendWindowStateChanged(nextIsFullscreen?: boolean, target = mainWindow)
 }
 
 function buildApplicationMenu() {
+  const copy = currentNativeCopy()
   const template = []
 
   const checkForUpdatesItem = {
-    label: 'Check for Updates…',
+    label: copy.checkForUpdates,
     click: () => sendOpenUpdatesRequested()
   }
 
@@ -5361,7 +5363,7 @@ function buildApplicationMenu() {
     template.push({
       label: APP_NAME,
       submenu: [
-        { label: `About ${APP_NAME}`, click: () => showAboutPanelFresh() },
+        { label: copy.about(APP_NAME), click: () => showAboutPanelFresh() },
         checkForUpdatesItem,
         { type: 'separator' },
         { role: 'services' },
@@ -5376,16 +5378,16 @@ function buildApplicationMenu() {
   }
 
   template.push({
-    label: 'File',
+    label: copy.file,
     submenu: [
       // No accelerator: ⌘⇧N is a rebindable renderer keybind (session.newWindow);
       // a menu accelerator would fight the rebind panel and (on macOS) be
       // swallowed before the renderer sees it. Here purely for discoverability.
-      { click: () => createInstanceWindow(), label: 'New Window' },
+      { click: () => createInstanceWindow(), label: copy.newWindow },
       // Same no-accelerator rationale: ⌘O is the rebindable renderer keybind
       // (workspace.openFolder). Clicking runs the same open-folder-as-project
       // flow through the renderer.
-      { click: () => sendOpenFolderRequested(), label: 'Open Folder…' },
+      { click: () => sendOpenFolderRequested(), label: copy.openFolder },
       { type: 'separator' },
       IS_MAC
         ? {
@@ -5396,13 +5398,13 @@ function buildApplicationMenu() {
             // renderer's close-active-tab. Clicking the item still closes the tab
             // (or window) via the same request.
             click: () => sendClosePreviewRequested(),
-            label: 'Close'
+            label: copy.close
           }
         : { role: 'quit' }
     ]
   })
   template.push({
-    label: 'Edit',
+    label: copy.edit,
     submenu: [
       { role: 'undo' },
       { role: 'redo' },
@@ -5421,21 +5423,21 @@ function buildApplicationMenu() {
     ]
   })
   template.push({
-    label: 'View',
+    label: copy.view,
     submenu: [
       { role: 'reload' },
       { role: 'forceReload' },
       { role: 'toggleDevTools' },
       { type: 'separator' },
       {
-        label: 'Actual Size',
+        label: copy.actualSize,
         accelerator: 'CommandOrControl+0',
         click: () => {
           setAndPersistZoomLevel(mainWindow, DEFAULT_ZOOM_LEVEL)
         }
       },
       {
-        label: 'Zoom In',
+        label: copy.zoomIn,
         accelerator: 'CommandOrControl+Plus',
         click: () => {
           if (mainWindow && !mainWindow.isDestroyed()) {
@@ -5444,7 +5446,7 @@ function buildApplicationMenu() {
         }
       },
       {
-        label: 'Zoom Out',
+        label: copy.zoomOut,
         accelerator: 'CommandOrControl+-',
         click: () => {
           if (mainWindow && !mainWindow.isDestroyed()) {
@@ -5457,13 +5459,13 @@ function buildApplicationMenu() {
     ]
   })
   template.push({
-    label: 'Window',
+    label: copy.window,
     submenu: IS_MAC
       ? [{ role: 'minimize' }, { role: 'zoom' }, { role: 'front' }]
       : [{ role: 'minimize' }, { role: 'close' }]
   })
   template.push({
-    label: 'Help',
+    label: copy.help,
     role: 'help',
     submenu: [checkForUpdatesItem]
   })
